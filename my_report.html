@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Untranslated UI Texts Report</title>
+<style>
+:root {
+  --primary-color: #007acc;
+  --background-color: #f9f9f9;
+  --border-color: #ccc;
+  --header-bg: #eaeaea;
+  --summary-bg: #dff0d8;
+  --summary-border: #d6e9c6;
+  --highlight-color: #ffff99 !important;
+  --detail-bg-even: #f9f9f9;
+  --detail-bg-odd: #ffffff;
+  --toast-bg: rgba(0, 0, 0, 0.8);
+  --toast-color: #fff;
+}
+body { font-family: Arial, sans-serif; margin: 20px; background-color: var(--background-color); color: #333; }
+h1, h2, h3 { color: #333; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+th, td { border: 1px solid var(--border-color); padding: 10px; text-align: left; }
+th { background-color: var(--header-bg); }
+tr:nth-child(even) { background-color: #f2f2f2; }
+.clickable { color: var(--primary-color); font-weight: bold; cursor: pointer; }
+.occurrence { margin-left: 20px; }
+a { text-decoration: none; color: var(--primary-color); }
+#searchInput, #sortSelect { padding: 8px; margin-right: 10px; border: 1px solid var(--border-color); }
+.summary-box { background-color: var(--summary-bg); border: 1px solid var(--summary-border); padding: 10px; margin-top: 10px; }
+.highlight { background-color: var(--highlight-color); transition: background-color 1s ease; }
+.detail-item { padding: 5px; border-bottom: 1px dashed var(--border-color); }
+.detail-item:nth-child(odd) { background-color: var(--detail-bg-odd); }
+.detail-item:nth-child(even) { background-color: var(--detail-bg-even); }
+.copy-btn { background: transparent; border: none; cursor: pointer; margin-left: 5px; color: var(--primary-color); font-size: 1em; }
+#copyToast {
+  display: none;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background-color: var(--toast-bg);
+  color: var(--toast-color);
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  z-index: 9999;
+}
+@media (max-width: 600px) {
+  body { margin: 10px; font-size: 14px; }
+  th, td { padding: 8px; }
+  #searchInput, #sortSelect { width: 100%; margin-bottom: 10px; }
+}
+</style>
+<script>
+function filterAndSortTable() {
+  var input = document.getElementById("searchInput");
+  var filter = input.value.toLowerCase();
+  var select = document.getElementById("sortSelect");
+  var sortOrder = select.value;
+  var table = document.getElementById("summaryTable");
+  var tbody = table.getElementsByTagName("tbody")[0];
+  var rows = Array.from(tbody.getElementsByTagName("tr"));
+  if (sortOrder !== "default") {
+    rows.sort(function(a, b) {
+      var aCount = parseInt(a.cells[1].innerText) || 0;
+      var bCount = parseInt(b.cells[1].innerText) || 0;
+      return sortOrder === "asc" ? aCount - bCount : bCount - aCount;
+    });
+  }
+  rows.forEach(function(row) { tbody.appendChild(row); });
+  rows.forEach(function(row) {
+    var cell = row.getElementsByTagName("td")[0];
+    if (cell) {
+      var txtValue = cell.textContent || cell.innerText;
+      row.style.display = txtValue.toLowerCase().indexOf(filter) > -1 ? "" : "none";
+    }
+  });
+  var details = document.getElementsByClassName("detail-item");
+  Array.from(details).forEach(function(item) {
+    var text = item.textContent || item.innerText;
+    item.style.display = text.toLowerCase().indexOf(filter) > -1 ? "" : "none";
+  });
+}
+function scrollToDetails(id) {
+  var element = document.getElementById(id);
+  if (element) {
+    element.scrollIntoView({ behavior: "smooth", block: "start" });
+    element.classList.add("highlight");
+    setTimeout(function() { element.classList.remove("highlight"); }, 2000);
+  }
+}
+function applyFilters() { filterAndSortTable(); }
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(function() {
+    showCopyToast("Copied: " + text);
+  }).catch(function(err) {
+    console.error("Failed to copy text: " + err);
+  });
+}
+function showCopyToast(message) {
+  var toast = document.getElementById("copyToast");
+  toast.innerText = message;
+  toast.style.display = "block";
+  setTimeout(function() { toast.style.display = "none"; }, 2000);
+}
+function exportCSV() {
+  var csv = "File,Line,Text\n";
+  for (var file in reportData) {
+    reportData[file].forEach(function(entry) {
+      var row = [file, entry.line, entry.text];
+      csv += row.join(",") + "\n";
+    });
+  }
+  var blob = new Blob([csv], { type: "text/csv" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "untranslated_report.csv";
+  a.click();
+}
+function exportJSON() {
+  var jsonStr = JSON.stringify(reportData, null, 2);
+  var blob = new Blob([jsonStr], { type: "application/json" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "untranslated_report.json";
+  a.click();
+}
+function exportExcel() {
+  var xml = `<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet">
+`;
+  xml += `  <Worksheet ss:Name="Report">
+`;
+  xml += `    <Table>
+`;
+  xml += `      <Row><Cell><Data ss:Type="String">File</Data></Cell><Cell><Data ss:Type="String">Line</Data></Cell><Cell><Data ss:Type="String">Text</Data></Cell></Row>
+`;
+  for (var file in reportData) {
+    reportData[file].forEach(function(entry) {
+      xml += `<Row><Cell><Data ss:Type="String">` + file + `</Data></Cell><Cell><Data ss:Type="Number">` + entry.line + `</Data></Cell><Cell><Data ss:Type="String">` + entry.text + `</Data></Cell></Row>
+`;
+    });
+  }
+  xml += `    </Table>
+  </Worksheet>
+</Workbook>`;
+  var blob = new Blob([xml], { type: "application/xml" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "untranslated_report.xls";
+  a.click();
+}
+function exportXML() {
+  var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<report>\n";
+  for (var file in reportData) {
+    reportData[file].forEach(function(entry) {
+      xml += "<entry>";
+      xml += "<file>" + file + "</file>";
+      xml += "<line>" + entry.line + "</line>";
+      xml += "<text>" + entry.text + "</text>";
+      xml += "</entry>\n";
+    });
+  }
+  xml += "</report>";
+  var blob = new Blob([xml], { type: "application/xml" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "untranslated_report.xml";
+  a.click();
+}
+function downloadPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF("p", "pt", "a4");
+  doc.html(document.body, {
+    callback: function (doc) {
+      doc.save("untranslated_report.pdf");
+    },
+    x: 10,
+    y: 10,
+    html2canvas: { scale: 0.8 }
+  });
+}
+function exportToGoogleSheets() {
+  // Google Sheets export removed.
+}
+</script>
+<script>
+var reportData = {};
+</script>
+</head>
+<body>
+<h1>Untranslated UI Texts Report</h1>
+<div id="copyToast"></div>
+<div style="margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+<input type="text" id="searchInput" onkeyup="applyFilters()" placeholder="Search files and texts...">
+<select id="sortSelect" onchange="applyFilters()">
+<option value="default" selected>Default Order</option>
+<option value="asc">Sort by Count Ascending</option>
+<option value="desc">Sort by Count Descending</option>
+</select>
+<h2>Summary</h2>
+<table id="summaryTable">
+<thead>
+<tr><th>File</th><th>Untranslated Count</th></tr>
+</thead>
+<tbody>
+</tbody>
+</table>
+<div class="summary-box">
+<p><strong>Total Files:</strong> 0</p>
+<p><strong>Total Untranslated:</strong> 0</p>
+</div>
+<div style="margin-top:30px; border-top:1px solid var(--border-color); padding-top:10px;">
+<h2>Export Options</h2>
+<button onclick="downloadPDF()">Download PDF</button>
+<button onclick="exportCSV()">Export CSV</button>
+<button onclick="exportJSON()">Export JSON</button>
+<button onclick="exportExcel()">Export Excel</button>
+<button onclick="exportXML()">Export XML</button>
+</div>
+<h2>Details</h2>
+<p>Report generated by Non-Translated UI Texts Finder.</p>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+function downloadPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF("p", "pt", "a4");
+  doc.html(document.body, {
+    callback: function (doc) { doc.save("untranslated_report.pdf"); },
+    x: 10, y: 10, html2canvas: { scale: 0.8 }
+  });
+}
+</script>
+</body>
+</html>

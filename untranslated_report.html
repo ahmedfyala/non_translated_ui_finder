@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Untranslated UI Texts Report</title>
+<style>
+:root {
+  --primary-color: #007acc;
+  --background-color: #f9f9f9;
+  --border-color: #ccc;
+  --header-bg: #eaeaea;
+  --summary-bg: #dff0d8;
+  --summary-border: #d6e9c6;
+  --highlight-color: #ffff99 !important;
+  --detail-bg-even: #f9f9f9;
+  --detail-bg-odd: #ffffff;
+  --toast-bg: rgba(0, 0, 0, 0.8);
+  --toast-color: #fff;
+}
+body { font-family: Arial, sans-serif; margin: 20px; background-color: var(--background-color); color: #333; }
+h1, h2, h3 { color: #333; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+th, td { border: 1px solid var(--border-color); padding: 10px; text-align: left; }
+th { background-color: var(--header-bg); }
+tr:nth-child(even) { background-color: #f2f2f2; }
+.clickable { color: var(--primary-color); font-weight: bold; cursor: pointer; }
+.occurrence { margin-left: 20px; }
+a { text-decoration: none; color: var(--primary-color); }
+#searchInput, #sortSelect { padding: 8px; margin-right: 10px; border: 1px solid var(--border-color); }
+.summary-box { background-color: var(--summary-bg); border: 1px solid var(--summary-border); padding: 10px; margin-top: 10px; }
+.highlight { background-color: var(--highlight-color); transition: background-color 1s ease; }
+.detail-item { padding: 5px; border-bottom: 1px dashed var(--border-color); }
+.detail-item:nth-child(odd) { background-color: var(--detail-bg-odd); }
+.detail-item:nth-child(even) { background-color: var(--detail-bg-even); }
+.copy-btn { background: transparent; border: none; cursor: pointer; margin-left: 5px; color: var(--primary-color); font-size: 1em; }
+#copyToast {
+  display: none;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background-color: var(--toast-bg);
+  color: var(--toast-color);
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  z-index: 9999;
+}
+@media (max-width: 600px) {
+  body { margin: 10px; font-size: 14px; }
+  th, td { padding: 8px; }
+  #searchInput, #sortSelect { width: 100%; margin-bottom: 10px; }
+}
+</style>
+<script>
+function filterAndSortTable() {
+  var input = document.getElementById("searchInput");
+  var filter = input.value.toLowerCase();
+  var select = document.getElementById("sortSelect");
+  var sortOrder = select.value;
+  var table = document.getElementById("summaryTable");
+  var tbody = table.getElementsByTagName("tbody")[0];
+  var rows = Array.from(tbody.getElementsByTagName("tr"));
+  if (sortOrder !== "default") {
+    rows.sort(function(a, b) {
+      var aCount = parseInt(a.cells[1].innerText) || 0;
+      var bCount = parseInt(b.cells[1].innerText) || 0;
+      return sortOrder === "asc" ? aCount - bCount : bCount - aCount;
+    });
+  }
+  rows.forEach(function(row) { tbody.appendChild(row); });
+  rows.forEach(function(row) {
+    var cell = row.getElementsByTagName("td")[0];
+    if (cell) {
+      var txtValue = cell.textContent || cell.innerText;
+      row.style.display = txtValue.toLowerCase().indexOf(filter) > -1 ? "" : "none";
+    }
+  });
+  var details = document.getElementsByClassName("detail-item");
+  Array.from(details).forEach(function(item) {
+    var text = item.textContent || item.innerText;
+    item.style.display = text.toLowerCase().indexOf(filter) > -1 ? "" : "none";
+  });
+}
+function scrollToDetails(id) {
+  var element = document.getElementById(id);
+  if (element) {
+    element.scrollIntoView({ behavior: "smooth", block: "start" });
+    element.classList.add("highlight");
+    setTimeout(function() { element.classList.remove("highlight"); }, 2000);
+  }
+}
+function applyFilters() { filterAndSortTable(); }
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(function() {
+    showCopyToast("Copied: " + text);
+  }).catch(function(err) {
+    console.error("Failed to copy text: " + err);
+  });
+}
+function showCopyToast(message) {
+  var toast = document.getElementById("copyToast");
+  toast.innerText = message;
+  toast.style.display = "block";
+  setTimeout(function() { toast.style.display = "none"; }, 2000);
+}
+function exportCSV() {
+  var csv = "File,Line,Text\n";
+  for (var file in reportData) {
+    reportData[file].forEach(function(entry) {
+      var row = [file, entry.line, entry.text];
+      csv += row.join(",") + "\n";
+    });
+  }
+  var blob = new Blob([csv], { type: "text/csv" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "untranslated_report.csv";
+  a.click();
+}
+function exportJSON() {
+  var jsonStr = JSON.stringify(reportData, null, 2);
+  var blob = new Blob([jsonStr], { type: "application/json" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "untranslated_report.json";
+  a.click();
+}
+function exportExcel() {
+  var xml = `<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet">
+`;
+  xml += `  <Worksheet ss:Name="Report">
+`;
+  xml += `    <Table>
+`;
+  xml += `      <Row><Cell><Data ss:Type="String">File</Data></Cell><Cell><Data ss:Type="String">Line</Data></Cell><Cell><Data ss:Type="String">Text</Data></Cell></Row>
+`;
+  for (var file in reportData) {
+    reportData[file].forEach(function(entry) {
+      xml += `<Row><Cell><Data ss:Type="String">` + file + `</Data></Cell><Cell><Data ss:Type="Number">` + entry.line + `</Data></Cell><Cell><Data ss:Type="String">` + entry.text + `</Data></Cell></Row>
+`;
+    });
+  }
+  xml += `    </Table>
+  </Worksheet>
+</Workbook>`;
+  var blob = new Blob([xml], { type: "application/xml" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "untranslated_report.xls";
+  a.click();
+}
+function downloadPDF() {
+  const { jsPDF } = window.jspdf;
+  html2canvas(document.body).then(canvas => {
+    const imgData = canvas.toDataURL("image/png");
+    const doc = new jsPDF("p", "pt", "a4");
+    const imgProps = doc.getImageProperties(imgData);
+    const pdfWidth = doc.internal.pageSize.getWidth();
+    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+    doc.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+    doc.save("untranslated_report.pdf");
+  });
+}
+</script>
+<script>
+var reportData = {"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\auth\\ui\\screens\\login_screen.dart":[{"line":50,"text":"Facebook Login Pressed"},{"line":54,"text":"Google Login Pressed"},{"line":58,"text":"Apple Login Pressed"},{"line":125,"text":"Login Failed"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\auth\\ui\\screens\\otp_verification_screen.dart":[{"line":186,"text":"email"},{"line":187,"text":"passwordToken"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\auth\\ui\\screens\\register_screen.dart":[{"line":48,"text":"Facebook Login Pressed"},{"line":52,"text":"Google Login Pressed"},{"line":56,"text":"Apple Login Pressed"},{"line":115,"text":"EG"},{"line":170,"text":"Register Failed"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\auth\\ui\\widgets\\custom_phone_field.dart":[{"line":59,"text":"[0-9]"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\checkout\\ui\\checkout_review_screen.dart":[{"line":198,"text":"selectedDates"},{"line":199,"text":"guestsCount"},{"line":200,"text":"checkoutCubit"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\checkout\\ui\\e_receipt_screen.dart":[{"line":49,"text":"Adults:\\s*(\\d+)"},{"line":51,"text":"Children:\\s*(\\d+)"},{"line":62,"text":"unit_id"},{"line":63,"text":"check_in"},{"line":64,"text":"check_out"},{"line":65,"text":"adults"},{"line":66,"text":"children"},{"line":67,"text":"meta_data"},{"line":69,"text":"promo_code"},{"line":70,"text":"redeem_coins"},{"line":71,"text":"is_redeem"},{"line":130,"text":"reservationId"},{"line":131,"text":"transactionId"},{"line":137,"text":"Payment secret not found"},{"line":142,"text":"CakeStay"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\checkout\\ui\\request_to_book_screen.dart":[{"line":62,"text":"adults"},{"line":63,"text":"children"},{"line":120,"text":"adults"},{"line":121,"text":"children"},{"line":195,"text":"selectedDates"},{"line":196,"text":"guestsCount"},{"line":197,"text":"checkoutCubit"},{"line":299,"text":"points"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\checkout\\ui\\show_transaction_screen.dart":[{"line":68,"text":"#N/A"},{"line":73,"text":"N/A"},{"line":78,"text":"N/A"},{"line":83,"text":"N/A"},{"line":88,"text":"N/A"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\home\\ui\\home_screen.dart":[{"line":232,"text":"No results found"},{"line":240,"text":"No matches found for your search"},{"line":276,"text":"selected"},{"line":277,"text":"dimmed"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\home\\ui\\widgets\\category_tab.dart":[{"line":23,"text":"selected"},{"line":25,"text":"selected"},{"line":28,"text":"dimmed"},{"line":48,"text":"dimmed"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\home\\ui\\widgets\\search_bottom_sheet.dart":[{"line":100,"text":"yyyy-MM-dd"},{"line":128,"text":"city_id"},{"line":131,"text":"No City Selected"},{"line":137,"text":"date_from"},{"line":138,"text":"yyyy-MM-dd"},{"line":139,"text":"date_to"},{"line":140,"text":"yyyy-MM-dd"},{"line":151,"text":"No Date Selected"},{"line":157,"text":"adults"},{"line":158,"text":"children"},{"line":163,"text":"No Guests"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\home\\ui\\widgets\\search_field.dart":[{"line":59,"text":"Destination - Duration - Guests"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\home\\ui\\widgets\\unit_card.dart":[{"line":327,"text":"bedroom"},{"line":341,"text":"bathroom"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\investments\\investment_unit_details\\ui\\investment_unit_info_section.dart":[{"line":88,"text":"bedroom"},{"line":92,"text":"bathroom"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\investments\\ui\\investments_screen.dart":[{"line":225,"text":"No results found"},{"line":233,"text":"No matches found for your search"},{"line":269,"text":"selected"},{"line":270,"text":"dimmed"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\investments\\ui\\widgets\\investment_category_tab.dart":[{"line":22,"text":"selected"},{"line":24,"text":"selected"},{"line":27,"text":"dimmed"},{"line":47,"text":"dimmed"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\investments\\ui\\widgets\\investment_search_bottom_sheet.dart":[{"line":94,"text":"city_id"},{"line":97,"text":"No City Selected"},{"line":100,"text":"min_price"},{"line":101,"text":"max_price"},{"line":108,"text":"- No price range"},{"line":168,"text":"Filter"},{"line":282,"text":"Price"},{"line":320,"text":"Apply Filter"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\investments\\ui\\widgets\\investment_search_field.dart":[{"line":57,"text":"Destination - price"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\investments\\ui\\widgets\\investment_unit_card.dart":[{"line":58,"text":"/investment-unit-details"},{"line":227,"text":"0.00"},{"line":278,"text":"bedroom"},{"line":292,"text":"bathroom"},{"line":357,"text":"Cakestay"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\layout\\ui\\main_layout.dart":[{"line":38,"text":"HomeScreen"},{"line":43,"text":"WishlistScreen"},{"line":46,"text":"InvestmentsScreen"},{"line":49,"text":"ProfileScreen"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\account_settings\\ui\\change_password_screen.dart":[{"line":50,"text":"Popping..."}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\account_settings\\ui\\edit_personal_info_screen.dart":[{"line":211,"text":"EG"},{"line":239,"text":"yyyy-MM-dd"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\account_settings\\ui\\personal_info_screen.dart":[{"line":48,"text":"Profile data is not loaded yet."},{"line":140,"text":"Initializing..."}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\app_settings\\ui\\app_settings_screen.dart":[{"line":80,"text":"English"},{"line":83,"text":"en"},{"line":84,"text":"English"},{"line":85,"text":"العربية"},{"line":87,"text":"ar"},{"line":88,"text":"العربية"},{"line":132,"text":"USD"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\app_settings\\ui\\language_screen.dart":[{"line":22,"text":"English"},{"line":22,"text":"العربية"},{"line":34,"text":"Language"},{"line":49,"text":"en"},{"line":49,"text":"English"},{"line":49,"text":"العربية"},{"line":64,"text":"English"},{"line":64,"text":"en"},{"line":64,"text":"ar"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\contact_us\\ui\\contact_us_screen.dart":[{"line":88,"text":"email"},{"line":88,"text":"facebook"},{"line":88,"text":"instagram"},{"line":88,"text":"contact_phone"},{"line":96,"text":"Send a message"},{"line":118,"text":"mailto:"},{"line":118,"text":"tel:"},{"line":120,"text":"www."},{"line":140,"text":"email"},{"line":145,"text":"facebook"},{"line":147,"text":"Facebook"},{"line":150,"text":"instagram"},{"line":152,"text":"Instagram"},{"line":155,"text":"contact_phone"},{"line":157,"text":"WhatsApp"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\contact_us\\ui\\send_message_screen.dart":[{"line":121,"text":"Type Problem Summary"},{"line":134,"text":"Type detailed description here ..."},{"line":135,"text":"Description"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\contact_us\\ui\\widgets\\contact_options_list.dart":[{"line":17,"text":"email"},{"line":17,"text":"facebook"},{"line":17,"text":"instagram"},{"line":17,"text":"contact_phone"},{"line":24,"text":"send_message"},{"line":25,"text":"Send a message"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\informative_page\\ui\\about_us_screen.dart":[{"line":35,"text":"about"},{"line":48,"text":"An error occurred."}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\informative_page\\ui\\legal_screen.dart":[{"line":23,"text":"Legal"},{"line":51,"text":"Terms and Conditions"},{"line":78,"text":"Privacy Policy"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\informative_page\\ui\\privacy_policy_screen.dart":[{"line":38,"text":"privacy"},{"line":51,"text":"An error occurred."}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\informative_page\\ui\\terms_and_conditions_screen.dart":[{"line":38,"text":"terms"},{"line":53,"text":"An error occurred."}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\profile\\ui\\profile_screen.dart":[{"line":133,"text":"/reviews"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\reservations\\ui\\reservation_details_screen.dart":[{"line":48,"text":"E-Receipt"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\profile\\reservations\\ui\\widgets\\unit_info_card.dart":[{"line":93,"text":"bedroom"},{"line":110,"text":"bathroom"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\rewards\\ui\\widgets\\rewards_badges_progress.dart":[{"line":75,"text":"current"},{"line":76,"text":"required"},{"line":117,"text":"ar"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\unit_details\\ui\\widgets\\custom_review_item.dart":[{"line":65,"text":"like"},{"line":70,"text":"like"},{"line":83,"text":"dislike"},{"line":90,"text":"dislike"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\unit_details\\ui\\widgets\\reviews_tab.dart":[{"line":21,"text":"No Reviews Available"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\unit_details\\ui\\widgets\\unit_info_section.dart":[{"line":79,"text":"bedroom"},{"line":91,"text":"bathroom"},{"line":157,"text":"Cakestay"}],"C:\\Users\\Win11\\StudioProjects\\cakestay\\lib\\feature\\wishlist\\ui\\widgets\\remove_confirmation_dialog.dart":[{"line":17,"text":"Are you sure you want to remove it from Wishlist ?"},{"line":33,"text":"Cancel"},{"line":39,"text":"Yes, Remove"}]};
+</script>
+</head>
+<body>
+<h1>Untranslated UI Texts Report</h1>
+<div id="copyToast"></div>
+<div style="margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+<input type="text" id="searchInput" onkeyup="applyFilters()" placeholder="Search files and texts...">
+<select id="sortSelect" onchange="applyFilters()">
+<option value="default" selected>Default Order</option>
+<option value="asc">Sort by Count Ascending</option>
+<option value="desc">Sort by Count Descending</option>
+</select>
+<h2>Summary</h2>
+<table id="summaryTable">
+<thead>
+<tr><th>File</th><th>Untranslated Count</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_auth_ui_screens_login_screen.dart')">lib/feature/auth/ui/screens/login_screen.dart</a></td>
+<td>4</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_auth_ui_screens_otp_verification_screen.dart')">lib/feature/auth/ui/screens/otp_verification_screen.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_auth_ui_screens_register_screen.dart')">lib/feature/auth/ui/screens/register_screen.dart</a></td>
+<td>5</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_auth_ui_widgets_custom_phone_field.dart')">lib/feature/auth/ui/widgets/custom_phone_field.dart</a></td>
+<td>1</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_checkout_ui_checkout_review_screen.dart')">lib/feature/checkout/ui/checkout_review_screen.dart</a></td>
+<td>3</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_checkout_ui_e_receipt_screen.dart')">lib/feature/checkout/ui/e_receipt_screen.dart</a></td>
+<td>15</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_checkout_ui_request_to_book_screen.dart')">lib/feature/checkout/ui/request_to_book_screen.dart</a></td>
+<td>8</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_checkout_ui_show_transaction_screen.dart')">lib/feature/checkout/ui/show_transaction_screen.dart</a></td>
+<td>5</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_home_ui_home_screen.dart')">lib/feature/home/ui/home_screen.dart</a></td>
+<td>4</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_home_ui_widgets_category_tab.dart')">lib/feature/home/ui/widgets/category_tab.dart</a></td>
+<td>4</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_home_ui_widgets_search_bottom_sheet.dart')">lib/feature/home/ui/widgets/search_bottom_sheet.dart</a></td>
+<td>11</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_home_ui_widgets_search_field.dart')">lib/feature/home/ui/widgets/search_field.dart</a></td>
+<td>1</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_home_ui_widgets_unit_card.dart')">lib/feature/home/ui/widgets/unit_card.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_investments_investment_unit_details_ui_investment_unit_info_section.dart')">lib/feature/investments/investment_unit_details/ui/investment_unit_info_section.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_investments_ui_investments_screen.dart')">lib/feature/investments/ui/investments_screen.dart</a></td>
+<td>4</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_investments_ui_widgets_investment_category_tab.dart')">lib/feature/investments/ui/widgets/investment_category_tab.dart</a></td>
+<td>4</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_investments_ui_widgets_investment_search_bottom_sheet.dart')">lib/feature/investments/ui/widgets/investment_search_bottom_sheet.dart</a></td>
+<td>8</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_investments_ui_widgets_investment_search_field.dart')">lib/feature/investments/ui/widgets/investment_search_field.dart</a></td>
+<td>1</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_investments_ui_widgets_investment_unit_card.dart')">lib/feature/investments/ui/widgets/investment_unit_card.dart</a></td>
+<td>5</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_layout_ui_main_layout.dart')">lib/feature/layout/ui/main_layout.dart</a></td>
+<td>4</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_account_settings_ui_change_password_screen.dart')">lib/feature/profile/account_settings/ui/change_password_screen.dart</a></td>
+<td>1</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_account_settings_ui_edit_personal_info_screen.dart')">lib/feature/profile/account_settings/ui/edit_personal_info_screen.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_account_settings_ui_personal_info_screen.dart')">lib/feature/profile/account_settings/ui/personal_info_screen.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_app_settings_ui_app_settings_screen.dart')">lib/feature/profile/app_settings/ui/app_settings_screen.dart</a></td>
+<td>7</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_app_settings_ui_language_screen.dart')">lib/feature/profile/app_settings/ui/language_screen.dart</a></td>
+<td>9</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_contact_us_ui_contact_us_screen.dart')">lib/feature/profile/contact_us/ui/contact_us_screen.dart</a></td>
+<td>15</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_contact_us_ui_send_message_screen.dart')">lib/feature/profile/contact_us/ui/send_message_screen.dart</a></td>
+<td>3</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_contact_us_ui_widgets_contact_options_list.dart')">lib/feature/profile/contact_us/ui/widgets/contact_options_list.dart</a></td>
+<td>6</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_informative_page_ui_about_us_screen.dart')">lib/feature/profile/informative_page/ui/about_us_screen.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_informative_page_ui_legal_screen.dart')">lib/feature/profile/informative_page/ui/legal_screen.dart</a></td>
+<td>3</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_informative_page_ui_privacy_policy_screen.dart')">lib/feature/profile/informative_page/ui/privacy_policy_screen.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_informative_page_ui_terms_and_conditions_screen.dart')">lib/feature/profile/informative_page/ui/terms_and_conditions_screen.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_profile_ui_profile_screen.dart')">lib/feature/profile/profile/ui/profile_screen.dart</a></td>
+<td>1</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_reservations_ui_reservation_details_screen.dart')">lib/feature/profile/reservations/ui/reservation_details_screen.dart</a></td>
+<td>1</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_profile_reservations_ui_widgets_unit_info_card.dart')">lib/feature/profile/reservations/ui/widgets/unit_info_card.dart</a></td>
+<td>2</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_rewards_ui_widgets_rewards_badges_progress.dart')">lib/feature/rewards/ui/widgets/rewards_badges_progress.dart</a></td>
+<td>3</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_unit_details_ui_widgets_custom_review_item.dart')">lib/feature/unit_details/ui/widgets/custom_review_item.dart</a></td>
+<td>4</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_unit_details_ui_widgets_reviews_tab.dart')">lib/feature/unit_details/ui/widgets/reviews_tab.dart</a></td>
+<td>1</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_unit_details_ui_widgets_unit_info_section.dart')">lib/feature/unit_details/ui/widgets/unit_info_section.dart</a></td>
+<td>3</td>
+</tr>
+<tr>
+<td><a class="clickable" href="javascript:void(0)" onclick="scrollToDetails('lib_feature_wishlist_ui_widgets_remove_confirmation_dialog.dart')">lib/feature/wishlist/ui/widgets/remove_confirmation_dialog.dart</a></td>
+<td>3</td>
+</tr>
+</tbody>
+</table>
+<div class="summary-box">
+<p><strong>Total Files:</strong> 40</p>
+<p><strong>Total Untranslated:</strong> 165</p>
+</div>
+<div style="margin-top:30px; border-top:1px solid var(--border-color); padding-top:10px;">
+<h2>Export Options</h2>
+<button onclick="exportCSV()">Export CSV</button>
+<button onclick="exportJSON()">Export JSON</button>
+<button onclick="exportExcel()">Export Excel</button>
+</div>
+<h2>Details</h2>
+<h3 id="lib_feature_auth_ui_screens_login_screen.dart" class="file-path detail-item">lib/feature/auth/ui/screens/login_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 50]: <span class="text-content">Facebook Login Pressed</span><button class="copy-btn" onclick="copyText('Facebook Login Pressed')">📋</button></li>
+<li class="detail-item">[Line 54]: <span class="text-content">Google Login Pressed</span><button class="copy-btn" onclick="copyText('Google Login Pressed')">📋</button></li>
+<li class="detail-item">[Line 58]: <span class="text-content">Apple Login Pressed</span><button class="copy-btn" onclick="copyText('Apple Login Pressed')">📋</button></li>
+<li class="detail-item">[Line 125]: <span class="text-content">Login Failed</span><button class="copy-btn" onclick="copyText('Login Failed')">📋</button></li>
+</ul>
+<h3 id="lib_feature_auth_ui_screens_otp_verification_screen.dart" class="file-path detail-item">lib/feature/auth/ui/screens/otp_verification_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 186]: <span class="text-content">email</span><button class="copy-btn" onclick="copyText('email')">📋</button></li>
+<li class="detail-item">[Line 187]: <span class="text-content">passwordToken</span><button class="copy-btn" onclick="copyText('passwordToken')">📋</button></li>
+</ul>
+<h3 id="lib_feature_auth_ui_screens_register_screen.dart" class="file-path detail-item">lib/feature/auth/ui/screens/register_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 48]: <span class="text-content">Facebook Login Pressed</span><button class="copy-btn" onclick="copyText('Facebook Login Pressed')">📋</button></li>
+<li class="detail-item">[Line 52]: <span class="text-content">Google Login Pressed</span><button class="copy-btn" onclick="copyText('Google Login Pressed')">📋</button></li>
+<li class="detail-item">[Line 56]: <span class="text-content">Apple Login Pressed</span><button class="copy-btn" onclick="copyText('Apple Login Pressed')">📋</button></li>
+<li class="detail-item">[Line 115]: <span class="text-content">EG</span><button class="copy-btn" onclick="copyText('EG')">📋</button></li>
+<li class="detail-item">[Line 170]: <span class="text-content">Register Failed</span><button class="copy-btn" onclick="copyText('Register Failed')">📋</button></li>
+</ul>
+<h3 id="lib_feature_auth_ui_widgets_custom_phone_field.dart" class="file-path detail-item">lib/feature/auth/ui/widgets/custom_phone_field.dart</h3>
+<ul>
+<li class="detail-item">[Line 59]: <span class="text-content">[0-9]</span><button class="copy-btn" onclick="copyText('[0-9]')">📋</button></li>
+</ul>
+<h3 id="lib_feature_checkout_ui_checkout_review_screen.dart" class="file-path detail-item">lib/feature/checkout/ui/checkout_review_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 198]: <span class="text-content">selectedDates</span><button class="copy-btn" onclick="copyText('selectedDates')">📋</button></li>
+<li class="detail-item">[Line 199]: <span class="text-content">guestsCount</span><button class="copy-btn" onclick="copyText('guestsCount')">📋</button></li>
+<li class="detail-item">[Line 200]: <span class="text-content">checkoutCubit</span><button class="copy-btn" onclick="copyText('checkoutCubit')">📋</button></li>
+</ul>
+<h3 id="lib_feature_checkout_ui_e_receipt_screen.dart" class="file-path detail-item">lib/feature/checkout/ui/e_receipt_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 49]: <span class="text-content">Adults:\s*(\d+)</span><button class="copy-btn" onclick="copyText('Adults:\s*(\d+)')">📋</button></li>
+<li class="detail-item">[Line 51]: <span class="text-content">Children:\s*(\d+)</span><button class="copy-btn" onclick="copyText('Children:\s*(\d+)')">📋</button></li>
+<li class="detail-item">[Line 62]: <span class="text-content">unit_id</span><button class="copy-btn" onclick="copyText('unit_id')">📋</button></li>
+<li class="detail-item">[Line 63]: <span class="text-content">check_in</span><button class="copy-btn" onclick="copyText('check_in')">📋</button></li>
+<li class="detail-item">[Line 64]: <span class="text-content">check_out</span><button class="copy-btn" onclick="copyText('check_out')">📋</button></li>
+<li class="detail-item">[Line 65]: <span class="text-content">adults</span><button class="copy-btn" onclick="copyText('adults')">📋</button></li>
+<li class="detail-item">[Line 66]: <span class="text-content">children</span><button class="copy-btn" onclick="copyText('children')">📋</button></li>
+<li class="detail-item">[Line 67]: <span class="text-content">meta_data</span><button class="copy-btn" onclick="copyText('meta_data')">📋</button></li>
+<li class="detail-item">[Line 69]: <span class="text-content">promo_code</span><button class="copy-btn" onclick="copyText('promo_code')">📋</button></li>
+<li class="detail-item">[Line 70]: <span class="text-content">redeem_coins</span><button class="copy-btn" onclick="copyText('redeem_coins')">📋</button></li>
+<li class="detail-item">[Line 71]: <span class="text-content">is_redeem</span><button class="copy-btn" onclick="copyText('is_redeem')">📋</button></li>
+<li class="detail-item">[Line 130]: <span class="text-content">reservationId</span><button class="copy-btn" onclick="copyText('reservationId')">📋</button></li>
+<li class="detail-item">[Line 131]: <span class="text-content">transactionId</span><button class="copy-btn" onclick="copyText('transactionId')">📋</button></li>
+<li class="detail-item">[Line 137]: <span class="text-content">Payment secret not found</span><button class="copy-btn" onclick="copyText('Payment secret not found')">📋</button></li>
+<li class="detail-item">[Line 142]: <span class="text-content">CakeStay</span><button class="copy-btn" onclick="copyText('CakeStay')">📋</button></li>
+</ul>
+<h3 id="lib_feature_checkout_ui_request_to_book_screen.dart" class="file-path detail-item">lib/feature/checkout/ui/request_to_book_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 62]: <span class="text-content">adults</span><button class="copy-btn" onclick="copyText('adults')">📋</button></li>
+<li class="detail-item">[Line 63]: <span class="text-content">children</span><button class="copy-btn" onclick="copyText('children')">📋</button></li>
+<li class="detail-item">[Line 120]: <span class="text-content">adults</span><button class="copy-btn" onclick="copyText('adults')">📋</button></li>
+<li class="detail-item">[Line 121]: <span class="text-content">children</span><button class="copy-btn" onclick="copyText('children')">📋</button></li>
+<li class="detail-item">[Line 195]: <span class="text-content">selectedDates</span><button class="copy-btn" onclick="copyText('selectedDates')">📋</button></li>
+<li class="detail-item">[Line 196]: <span class="text-content">guestsCount</span><button class="copy-btn" onclick="copyText('guestsCount')">📋</button></li>
+<li class="detail-item">[Line 197]: <span class="text-content">checkoutCubit</span><button class="copy-btn" onclick="copyText('checkoutCubit')">📋</button></li>
+<li class="detail-item">[Line 299]: <span class="text-content">points</span><button class="copy-btn" onclick="copyText('points')">📋</button></li>
+</ul>
+<h3 id="lib_feature_checkout_ui_show_transaction_screen.dart" class="file-path detail-item">lib/feature/checkout/ui/show_transaction_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 68]: <span class="text-content">#N/A</span><button class="copy-btn" onclick="copyText('#N/A')">📋</button></li>
+<li class="detail-item">[Line 73]: <span class="text-content">N/A</span><button class="copy-btn" onclick="copyText('N/A')">📋</button></li>
+<li class="detail-item">[Line 78]: <span class="text-content">N/A</span><button class="copy-btn" onclick="copyText('N/A')">📋</button></li>
+<li class="detail-item">[Line 83]: <span class="text-content">N/A</span><button class="copy-btn" onclick="copyText('N/A')">📋</button></li>
+<li class="detail-item">[Line 88]: <span class="text-content">N/A</span><button class="copy-btn" onclick="copyText('N/A')">📋</button></li>
+</ul>
+<h3 id="lib_feature_home_ui_home_screen.dart" class="file-path detail-item">lib/feature/home/ui/home_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 232]: <span class="text-content">No results found</span><button class="copy-btn" onclick="copyText('No results found')">📋</button></li>
+<li class="detail-item">[Line 240]: <span class="text-content">No matches found for your search</span><button class="copy-btn" onclick="copyText('No matches found for your search')">📋</button></li>
+<li class="detail-item">[Line 276]: <span class="text-content">selected</span><button class="copy-btn" onclick="copyText('selected')">📋</button></li>
+<li class="detail-item">[Line 277]: <span class="text-content">dimmed</span><button class="copy-btn" onclick="copyText('dimmed')">📋</button></li>
+</ul>
+<h3 id="lib_feature_home_ui_widgets_category_tab.dart" class="file-path detail-item">lib/feature/home/ui/widgets/category_tab.dart</h3>
+<ul>
+<li class="detail-item">[Line 23]: <span class="text-content">selected</span><button class="copy-btn" onclick="copyText('selected')">📋</button></li>
+<li class="detail-item">[Line 25]: <span class="text-content">selected</span><button class="copy-btn" onclick="copyText('selected')">📋</button></li>
+<li class="detail-item">[Line 28]: <span class="text-content">dimmed</span><button class="copy-btn" onclick="copyText('dimmed')">📋</button></li>
+<li class="detail-item">[Line 48]: <span class="text-content">dimmed</span><button class="copy-btn" onclick="copyText('dimmed')">📋</button></li>
+</ul>
+<h3 id="lib_feature_home_ui_widgets_search_bottom_sheet.dart" class="file-path detail-item">lib/feature/home/ui/widgets/search_bottom_sheet.dart</h3>
+<ul>
+<li class="detail-item">[Line 100]: <span class="text-content">yyyy-MM-dd</span><button class="copy-btn" onclick="copyText('yyyy-MM-dd')">📋</button></li>
+<li class="detail-item">[Line 128]: <span class="text-content">city_id</span><button class="copy-btn" onclick="copyText('city_id')">📋</button></li>
+<li class="detail-item">[Line 131]: <span class="text-content">No City Selected</span><button class="copy-btn" onclick="copyText('No City Selected')">📋</button></li>
+<li class="detail-item">[Line 137]: <span class="text-content">date_from</span><button class="copy-btn" onclick="copyText('date_from')">📋</button></li>
+<li class="detail-item">[Line 138]: <span class="text-content">yyyy-MM-dd</span><button class="copy-btn" onclick="copyText('yyyy-MM-dd')">📋</button></li>
+<li class="detail-item">[Line 139]: <span class="text-content">date_to</span><button class="copy-btn" onclick="copyText('date_to')">📋</button></li>
+<li class="detail-item">[Line 140]: <span class="text-content">yyyy-MM-dd</span><button class="copy-btn" onclick="copyText('yyyy-MM-dd')">📋</button></li>
+<li class="detail-item">[Line 151]: <span class="text-content">No Date Selected</span><button class="copy-btn" onclick="copyText('No Date Selected')">📋</button></li>
+<li class="detail-item">[Line 157]: <span class="text-content">adults</span><button class="copy-btn" onclick="copyText('adults')">📋</button></li>
+<li class="detail-item">[Line 158]: <span class="text-content">children</span><button class="copy-btn" onclick="copyText('children')">📋</button></li>
+<li class="detail-item">[Line 163]: <span class="text-content">No Guests</span><button class="copy-btn" onclick="copyText('No Guests')">📋</button></li>
+</ul>
+<h3 id="lib_feature_home_ui_widgets_search_field.dart" class="file-path detail-item">lib/feature/home/ui/widgets/search_field.dart</h3>
+<ul>
+<li class="detail-item">[Line 59]: <span class="text-content">Destination - Duration - Guests</span><button class="copy-btn" onclick="copyText('Destination - Duration - Guests')">📋</button></li>
+</ul>
+<h3 id="lib_feature_home_ui_widgets_unit_card.dart" class="file-path detail-item">lib/feature/home/ui/widgets/unit_card.dart</h3>
+<ul>
+<li class="detail-item">[Line 327]: <span class="text-content">bedroom</span><button class="copy-btn" onclick="copyText('bedroom')">📋</button></li>
+<li class="detail-item">[Line 341]: <span class="text-content">bathroom</span><button class="copy-btn" onclick="copyText('bathroom')">📋</button></li>
+</ul>
+<h3 id="lib_feature_investments_investment_unit_details_ui_investment_unit_info_section.dart" class="file-path detail-item">lib/feature/investments/investment_unit_details/ui/investment_unit_info_section.dart</h3>
+<ul>
+<li class="detail-item">[Line 88]: <span class="text-content">bedroom</span><button class="copy-btn" onclick="copyText('bedroom')">📋</button></li>
+<li class="detail-item">[Line 92]: <span class="text-content">bathroom</span><button class="copy-btn" onclick="copyText('bathroom')">📋</button></li>
+</ul>
+<h3 id="lib_feature_investments_ui_investments_screen.dart" class="file-path detail-item">lib/feature/investments/ui/investments_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 225]: <span class="text-content">No results found</span><button class="copy-btn" onclick="copyText('No results found')">📋</button></li>
+<li class="detail-item">[Line 233]: <span class="text-content">No matches found for your search</span><button class="copy-btn" onclick="copyText('No matches found for your search')">📋</button></li>
+<li class="detail-item">[Line 269]: <span class="text-content">selected</span><button class="copy-btn" onclick="copyText('selected')">📋</button></li>
+<li class="detail-item">[Line 270]: <span class="text-content">dimmed</span><button class="copy-btn" onclick="copyText('dimmed')">📋</button></li>
+</ul>
+<h3 id="lib_feature_investments_ui_widgets_investment_category_tab.dart" class="file-path detail-item">lib/feature/investments/ui/widgets/investment_category_tab.dart</h3>
+<ul>
+<li class="detail-item">[Line 22]: <span class="text-content">selected</span><button class="copy-btn" onclick="copyText('selected')">📋</button></li>
+<li class="detail-item">[Line 24]: <span class="text-content">selected</span><button class="copy-btn" onclick="copyText('selected')">📋</button></li>
+<li class="detail-item">[Line 27]: <span class="text-content">dimmed</span><button class="copy-btn" onclick="copyText('dimmed')">📋</button></li>
+<li class="detail-item">[Line 47]: <span class="text-content">dimmed</span><button class="copy-btn" onclick="copyText('dimmed')">📋</button></li>
+</ul>
+<h3 id="lib_feature_investments_ui_widgets_investment_search_bottom_sheet.dart" class="file-path detail-item">lib/feature/investments/ui/widgets/investment_search_bottom_sheet.dart</h3>
+<ul>
+<li class="detail-item">[Line 94]: <span class="text-content">city_id</span><button class="copy-btn" onclick="copyText('city_id')">📋</button></li>
+<li class="detail-item">[Line 97]: <span class="text-content">No City Selected</span><button class="copy-btn" onclick="copyText('No City Selected')">📋</button></li>
+<li class="detail-item">[Line 100]: <span class="text-content">min_price</span><button class="copy-btn" onclick="copyText('min_price')">📋</button></li>
+<li class="detail-item">[Line 101]: <span class="text-content">max_price</span><button class="copy-btn" onclick="copyText('max_price')">📋</button></li>
+<li class="detail-item">[Line 108]: <span class="text-content">- No price range</span><button class="copy-btn" onclick="copyText('- No price range')">📋</button></li>
+<li class="detail-item">[Line 168]: <span class="text-content">Filter</span><button class="copy-btn" onclick="copyText('Filter')">📋</button></li>
+<li class="detail-item">[Line 282]: <span class="text-content">Price</span><button class="copy-btn" onclick="copyText('Price')">📋</button></li>
+<li class="detail-item">[Line 320]: <span class="text-content">Apply Filter</span><button class="copy-btn" onclick="copyText('Apply Filter')">📋</button></li>
+</ul>
+<h3 id="lib_feature_investments_ui_widgets_investment_search_field.dart" class="file-path detail-item">lib/feature/investments/ui/widgets/investment_search_field.dart</h3>
+<ul>
+<li class="detail-item">[Line 57]: <span class="text-content">Destination - price</span><button class="copy-btn" onclick="copyText('Destination - price')">📋</button></li>
+</ul>
+<h3 id="lib_feature_investments_ui_widgets_investment_unit_card.dart" class="file-path detail-item">lib/feature/investments/ui/widgets/investment_unit_card.dart</h3>
+<ul>
+<li class="detail-item">[Line 58]: <span class="text-content">/investment-unit-details</span><button class="copy-btn" onclick="copyText('/investment-unit-details')">📋</button></li>
+<li class="detail-item">[Line 227]: <span class="text-content">0.00</span><button class="copy-btn" onclick="copyText('0.00')">📋</button></li>
+<li class="detail-item">[Line 278]: <span class="text-content">bedroom</span><button class="copy-btn" onclick="copyText('bedroom')">📋</button></li>
+<li class="detail-item">[Line 292]: <span class="text-content">bathroom</span><button class="copy-btn" onclick="copyText('bathroom')">📋</button></li>
+<li class="detail-item">[Line 357]: <span class="text-content">Cakestay</span><button class="copy-btn" onclick="copyText('Cakestay')">📋</button></li>
+</ul>
+<h3 id="lib_feature_layout_ui_main_layout.dart" class="file-path detail-item">lib/feature/layout/ui/main_layout.dart</h3>
+<ul>
+<li class="detail-item">[Line 38]: <span class="text-content">HomeScreen</span><button class="copy-btn" onclick="copyText('HomeScreen')">📋</button></li>
+<li class="detail-item">[Line 43]: <span class="text-content">WishlistScreen</span><button class="copy-btn" onclick="copyText('WishlistScreen')">📋</button></li>
+<li class="detail-item">[Line 46]: <span class="text-content">InvestmentsScreen</span><button class="copy-btn" onclick="copyText('InvestmentsScreen')">📋</button></li>
+<li class="detail-item">[Line 49]: <span class="text-content">ProfileScreen</span><button class="copy-btn" onclick="copyText('ProfileScreen')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_account_settings_ui_change_password_screen.dart" class="file-path detail-item">lib/feature/profile/account_settings/ui/change_password_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 50]: <span class="text-content">Popping...</span><button class="copy-btn" onclick="copyText('Popping...')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_account_settings_ui_edit_personal_info_screen.dart" class="file-path detail-item">lib/feature/profile/account_settings/ui/edit_personal_info_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 211]: <span class="text-content">EG</span><button class="copy-btn" onclick="copyText('EG')">📋</button></li>
+<li class="detail-item">[Line 239]: <span class="text-content">yyyy-MM-dd</span><button class="copy-btn" onclick="copyText('yyyy-MM-dd')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_account_settings_ui_personal_info_screen.dart" class="file-path detail-item">lib/feature/profile/account_settings/ui/personal_info_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 48]: <span class="text-content">Profile data is not loaded yet.</span><button class="copy-btn" onclick="copyText('Profile data is not loaded yet.')">📋</button></li>
+<li class="detail-item">[Line 140]: <span class="text-content">Initializing...</span><button class="copy-btn" onclick="copyText('Initializing...')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_app_settings_ui_app_settings_screen.dart" class="file-path detail-item">lib/feature/profile/app_settings/ui/app_settings_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 80]: <span class="text-content">English</span><button class="copy-btn" onclick="copyText('English')">📋</button></li>
+<li class="detail-item">[Line 83]: <span class="text-content">en</span><button class="copy-btn" onclick="copyText('en')">📋</button></li>
+<li class="detail-item">[Line 84]: <span class="text-content">English</span><button class="copy-btn" onclick="copyText('English')">📋</button></li>
+<li class="detail-item">[Line 85]: <span class="text-content">العربية</span><button class="copy-btn" onclick="copyText('العربية')">📋</button></li>
+<li class="detail-item">[Line 87]: <span class="text-content">ar</span><button class="copy-btn" onclick="copyText('ar')">📋</button></li>
+<li class="detail-item">[Line 88]: <span class="text-content">العربية</span><button class="copy-btn" onclick="copyText('العربية')">📋</button></li>
+<li class="detail-item">[Line 132]: <span class="text-content">USD</span><button class="copy-btn" onclick="copyText('USD')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_app_settings_ui_language_screen.dart" class="file-path detail-item">lib/feature/profile/app_settings/ui/language_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 22]: <span class="text-content">English</span><button class="copy-btn" onclick="copyText('English')">📋</button></li>
+<li class="detail-item">[Line 22]: <span class="text-content">العربية</span><button class="copy-btn" onclick="copyText('العربية')">📋</button></li>
+<li class="detail-item">[Line 34]: <span class="text-content">Language</span><button class="copy-btn" onclick="copyText('Language')">📋</button></li>
+<li class="detail-item">[Line 49]: <span class="text-content">en</span><button class="copy-btn" onclick="copyText('en')">📋</button></li>
+<li class="detail-item">[Line 49]: <span class="text-content">English</span><button class="copy-btn" onclick="copyText('English')">📋</button></li>
+<li class="detail-item">[Line 49]: <span class="text-content">العربية</span><button class="copy-btn" onclick="copyText('العربية')">📋</button></li>
+<li class="detail-item">[Line 64]: <span class="text-content">English</span><button class="copy-btn" onclick="copyText('English')">📋</button></li>
+<li class="detail-item">[Line 64]: <span class="text-content">en</span><button class="copy-btn" onclick="copyText('en')">📋</button></li>
+<li class="detail-item">[Line 64]: <span class="text-content">ar</span><button class="copy-btn" onclick="copyText('ar')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_contact_us_ui_contact_us_screen.dart" class="file-path detail-item">lib/feature/profile/contact_us/ui/contact_us_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 88]: <span class="text-content">email</span><button class="copy-btn" onclick="copyText('email')">📋</button></li>
+<li class="detail-item">[Line 88]: <span class="text-content">facebook</span><button class="copy-btn" onclick="copyText('facebook')">📋</button></li>
+<li class="detail-item">[Line 88]: <span class="text-content">instagram</span><button class="copy-btn" onclick="copyText('instagram')">📋</button></li>
+<li class="detail-item">[Line 88]: <span class="text-content">contact_phone</span><button class="copy-btn" onclick="copyText('contact_phone')">📋</button></li>
+<li class="detail-item">[Line 96]: <span class="text-content">Send a message</span><button class="copy-btn" onclick="copyText('Send a message')">📋</button></li>
+<li class="detail-item">[Line 118]: <span class="text-content">mailto:</span><button class="copy-btn" onclick="copyText('mailto:')">📋</button></li>
+<li class="detail-item">[Line 118]: <span class="text-content">tel:</span><button class="copy-btn" onclick="copyText('tel:')">📋</button></li>
+<li class="detail-item">[Line 120]: <span class="text-content">www.</span><button class="copy-btn" onclick="copyText('www.')">📋</button></li>
+<li class="detail-item">[Line 140]: <span class="text-content">email</span><button class="copy-btn" onclick="copyText('email')">📋</button></li>
+<li class="detail-item">[Line 145]: <span class="text-content">facebook</span><button class="copy-btn" onclick="copyText('facebook')">📋</button></li>
+<li class="detail-item">[Line 147]: <span class="text-content">Facebook</span><button class="copy-btn" onclick="copyText('Facebook')">📋</button></li>
+<li class="detail-item">[Line 150]: <span class="text-content">instagram</span><button class="copy-btn" onclick="copyText('instagram')">📋</button></li>
+<li class="detail-item">[Line 152]: <span class="text-content">Instagram</span><button class="copy-btn" onclick="copyText('Instagram')">📋</button></li>
+<li class="detail-item">[Line 155]: <span class="text-content">contact_phone</span><button class="copy-btn" onclick="copyText('contact_phone')">📋</button></li>
+<li class="detail-item">[Line 157]: <span class="text-content">WhatsApp</span><button class="copy-btn" onclick="copyText('WhatsApp')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_contact_us_ui_send_message_screen.dart" class="file-path detail-item">lib/feature/profile/contact_us/ui/send_message_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 121]: <span class="text-content">Type Problem Summary</span><button class="copy-btn" onclick="copyText('Type Problem Summary')">📋</button></li>
+<li class="detail-item">[Line 134]: <span class="text-content">Type detailed description here ...</span><button class="copy-btn" onclick="copyText('Type detailed description here ...')">📋</button></li>
+<li class="detail-item">[Line 135]: <span class="text-content">Description</span><button class="copy-btn" onclick="copyText('Description')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_contact_us_ui_widgets_contact_options_list.dart" class="file-path detail-item">lib/feature/profile/contact_us/ui/widgets/contact_options_list.dart</h3>
+<ul>
+<li class="detail-item">[Line 17]: <span class="text-content">email</span><button class="copy-btn" onclick="copyText('email')">📋</button></li>
+<li class="detail-item">[Line 17]: <span class="text-content">facebook</span><button class="copy-btn" onclick="copyText('facebook')">📋</button></li>
+<li class="detail-item">[Line 17]: <span class="text-content">instagram</span><button class="copy-btn" onclick="copyText('instagram')">📋</button></li>
+<li class="detail-item">[Line 17]: <span class="text-content">contact_phone</span><button class="copy-btn" onclick="copyText('contact_phone')">📋</button></li>
+<li class="detail-item">[Line 24]: <span class="text-content">send_message</span><button class="copy-btn" onclick="copyText('send_message')">📋</button></li>
+<li class="detail-item">[Line 25]: <span class="text-content">Send a message</span><button class="copy-btn" onclick="copyText('Send a message')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_informative_page_ui_about_us_screen.dart" class="file-path detail-item">lib/feature/profile/informative_page/ui/about_us_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 35]: <span class="text-content">about</span><button class="copy-btn" onclick="copyText('about')">📋</button></li>
+<li class="detail-item">[Line 48]: <span class="text-content">An error occurred.</span><button class="copy-btn" onclick="copyText('An error occurred.')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_informative_page_ui_legal_screen.dart" class="file-path detail-item">lib/feature/profile/informative_page/ui/legal_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 23]: <span class="text-content">Legal</span><button class="copy-btn" onclick="copyText('Legal')">📋</button></li>
+<li class="detail-item">[Line 51]: <span class="text-content">Terms and Conditions</span><button class="copy-btn" onclick="copyText('Terms and Conditions')">📋</button></li>
+<li class="detail-item">[Line 78]: <span class="text-content">Privacy Policy</span><button class="copy-btn" onclick="copyText('Privacy Policy')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_informative_page_ui_privacy_policy_screen.dart" class="file-path detail-item">lib/feature/profile/informative_page/ui/privacy_policy_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 38]: <span class="text-content">privacy</span><button class="copy-btn" onclick="copyText('privacy')">📋</button></li>
+<li class="detail-item">[Line 51]: <span class="text-content">An error occurred.</span><button class="copy-btn" onclick="copyText('An error occurred.')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_informative_page_ui_terms_and_conditions_screen.dart" class="file-path detail-item">lib/feature/profile/informative_page/ui/terms_and_conditions_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 38]: <span class="text-content">terms</span><button class="copy-btn" onclick="copyText('terms')">📋</button></li>
+<li class="detail-item">[Line 53]: <span class="text-content">An error occurred.</span><button class="copy-btn" onclick="copyText('An error occurred.')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_profile_ui_profile_screen.dart" class="file-path detail-item">lib/feature/profile/profile/ui/profile_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 133]: <span class="text-content">/reviews</span><button class="copy-btn" onclick="copyText('/reviews')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_reservations_ui_reservation_details_screen.dart" class="file-path detail-item">lib/feature/profile/reservations/ui/reservation_details_screen.dart</h3>
+<ul>
+<li class="detail-item">[Line 48]: <span class="text-content">E-Receipt</span><button class="copy-btn" onclick="copyText('E-Receipt')">📋</button></li>
+</ul>
+<h3 id="lib_feature_profile_reservations_ui_widgets_unit_info_card.dart" class="file-path detail-item">lib/feature/profile/reservations/ui/widgets/unit_info_card.dart</h3>
+<ul>
+<li class="detail-item">[Line 93]: <span class="text-content">bedroom</span><button class="copy-btn" onclick="copyText('bedroom')">📋</button></li>
+<li class="detail-item">[Line 110]: <span class="text-content">bathroom</span><button class="copy-btn" onclick="copyText('bathroom')">📋</button></li>
+</ul>
+<h3 id="lib_feature_rewards_ui_widgets_rewards_badges_progress.dart" class="file-path detail-item">lib/feature/rewards/ui/widgets/rewards_badges_progress.dart</h3>
+<ul>
+<li class="detail-item">[Line 75]: <span class="text-content">current</span><button class="copy-btn" onclick="copyText('current')">📋</button></li>
+<li class="detail-item">[Line 76]: <span class="text-content">required</span><button class="copy-btn" onclick="copyText('required')">📋</button></li>
+<li class="detail-item">[Line 117]: <span class="text-content">ar</span><button class="copy-btn" onclick="copyText('ar')">📋</button></li>
+</ul>
+<h3 id="lib_feature_unit_details_ui_widgets_custom_review_item.dart" class="file-path detail-item">lib/feature/unit_details/ui/widgets/custom_review_item.dart</h3>
+<ul>
+<li class="detail-item">[Line 65]: <span class="text-content">like</span><button class="copy-btn" onclick="copyText('like')">📋</button></li>
+<li class="detail-item">[Line 70]: <span class="text-content">like</span><button class="copy-btn" onclick="copyText('like')">📋</button></li>
+<li class="detail-item">[Line 83]: <span class="text-content">dislike</span><button class="copy-btn" onclick="copyText('dislike')">📋</button></li>
+<li class="detail-item">[Line 90]: <span class="text-content">dislike</span><button class="copy-btn" onclick="copyText('dislike')">📋</button></li>
+</ul>
+<h3 id="lib_feature_unit_details_ui_widgets_reviews_tab.dart" class="file-path detail-item">lib/feature/unit_details/ui/widgets/reviews_tab.dart</h3>
+<ul>
+<li class="detail-item">[Line 21]: <span class="text-content">No Reviews Available</span><button class="copy-btn" onclick="copyText('No Reviews Available')">📋</button></li>
+</ul>
+<h3 id="lib_feature_unit_details_ui_widgets_unit_info_section.dart" class="file-path detail-item">lib/feature/unit_details/ui/widgets/unit_info_section.dart</h3>
+<ul>
+<li class="detail-item">[Line 79]: <span class="text-content">bedroom</span><button class="copy-btn" onclick="copyText('bedroom')">📋</button></li>
+<li class="detail-item">[Line 91]: <span class="text-content">bathroom</span><button class="copy-btn" onclick="copyText('bathroom')">📋</button></li>
+<li class="detail-item">[Line 157]: <span class="text-content">Cakestay</span><button class="copy-btn" onclick="copyText('Cakestay')">📋</button></li>
+</ul>
+<h3 id="lib_feature_wishlist_ui_widgets_remove_confirmation_dialog.dart" class="file-path detail-item">lib/feature/wishlist/ui/widgets/remove_confirmation_dialog.dart</h3>
+<ul>
+<li class="detail-item">[Line 17]: <span class="text-content">Are you sure you want to remove it from Wishlist ?</span><button class="copy-btn" onclick="copyText('Are you sure you want to remove it from Wishlist ?')">📋</button></li>
+<li class="detail-item">[Line 33]: <span class="text-content">Cancel</span><button class="copy-btn" onclick="copyText('Cancel')">📋</button></li>
+<li class="detail-item">[Line 39]: <span class="text-content">Yes, Remove</span><button class="copy-btn" onclick="copyText('Yes, Remove')">📋</button></li>
+</ul>
+<p>Report generated by Non-Translated UI Texts Finder.</p>

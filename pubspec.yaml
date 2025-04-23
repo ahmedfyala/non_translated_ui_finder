@@ -1,0 +1,16 @@
+name: non_translated_ui_finder
+description: A Dart package to scan your project for hard-coded UI texts and generate a clickable HTML report.
+version: 1.0.0
+# repository: https://github.com/my_org/my_repo
+#homepage: https://github.com/yourusername/non_translated_ui_finder
+#repository: https://github.com/yourusername/non_translated_ui_finder.git
+environment:
+  sdk: '>=2.18.0 <3.0.0'
+
+# Add regular dependencies here.
+dependencies:
+  args: ^2.7.0        # لتحليل خيارات سطر الأوامر
+  path: ^1.9.1        # للتعامل مع مسارات الملفات بسهولة
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.24.0
